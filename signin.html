@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Connect a Multix device to your Google account.">
+<title>Connect Multix · letthedevcook</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root{--bg:#0b0b10;--s1:#13131b;--ln:#272736;--tx:#ededf6;--mu:#9494ac;--ac:#ff7a3d;--ac2:#ffb347;--ok:#4dd98c;--err:#ff6877}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:radial-gradient(700px 360px at 50% 0,rgba(255,122,61,.15),transparent),var(--bg);color:var(--tx);font:16px/1.6 Inter,"Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+a{color:inherit;text-decoration:none}
+.wrap{width:min(100%,470px)}
+.brand{display:block;text-align:center;font-size:19px;font-weight:800;margin-bottom:28px}
+.brand b{background:linear-gradient(135deg,var(--ac),var(--ac2));-webkit-background-clip:text;background-clip:text;color:transparent}
+.card{background:rgba(19,19,27,.96);border:1px solid var(--ln);border-radius:22px;padding:32px;box-shadow:0 24px 90px rgba(0,0,0,.3)}
+.pill{display:inline-block;padding:5px 12px;border:1px solid var(--ln);border-radius:99px;color:var(--mu);font-size:12px;background:#101018}
+h1{font-size:30px;line-height:1.15;letter-spacing:-.8px;margin:18px 0 8px}
+.muted{color:var(--mu);margin:0 0 24px;font-size:14.5px}
+label{display:block;font-size:13px;color:var(--mu);margin-bottom:8px}
+input{width:100%;height:54px;border:1px solid var(--ln);border-radius:12px;background:#0b0b10;color:var(--tx);font:700 23px/1 Consolas,"SF Mono",monospace;letter-spacing:7px;text-align:center;outline:none;padding:0 14px}
+input:focus{border-color:var(--ac);box-shadow:0 0 0 3px rgba(255,122,61,.13)}
+.hint{font-size:12px;color:var(--mu);margin:9px 0 22px}
+.google{display:flex;justify-content:center;min-height:46px}
+#googleButton{min-height:44px}
+.status{display:none;margin-top:20px;padding:12px 14px;border:1px solid var(--ln);border-radius:11px;font-size:13.5px;color:var(--mu);overflow-wrap:anywhere}
+.status.show{display:block}.status.success{border-color:rgba(77,217,140,.35);color:var(--ok)}.status.error{border-color:rgba(255,104,119,.35);color:var(--err)}
+.foot{color:var(--mu);font-size:12px;text-align:center;margin-top:20px}
+@media(max-width:520px){.card{padding:24px}h1{font-size:27px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <a class="brand" href="./">🔥 <b>letthedevcook</b></a>
+  <section class="card">
+    <span class="pill">MULTIX · DEVICE LINK</span>
+    <h1>Connect your device.</h1>
+    <p class="muted">Enter the pairing code shown in Multix, then continue with Google. You can open this page on another phone or computer.</p>
+    <label for="pairingCode">8-digit pairing code</label>
+    <input id="pairingCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="00000000">
+    <p class="hint">The code expires after 5 minutes and can only be used once.</p>
+    <div class="google"><div id="googleButton"></div></div>
+    <div id="status" class="status" role="status" aria-live="polite"></div>
+  </section>
+  <p class="foot">Only the Multix instance that requested this code receives the session.</p>
+</main>
+<script>
+  // Set these values after deploying the Node.js auth server and creating a Google Web Client ID.
+  const API_BASE_URL = "https://your-multix-api.example.com";
+  const GOOGLE_CLIENT_ID = "YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com";
+  const codeInput = document.getElementById("pairingCode");
+  const statusBox = document.getElementById("status");
+  const googleButton = document.getElementById("googleButton");
+  const queryCode = new URLSearchParams(location.search).get("code");
+  if (queryCode && /^\d{8}$/.test(queryCode)) codeInput.value = queryCode;
+
+  function setStatus(message, type) {
+    statusBox.textContent = message;
+    statusBox.className = "status show" + (type ? " " + type : "");
+  }
+  function createNonce() {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    let binary = "";
+    bytes.forEach((value) => { binary += String.fromCharCode(value); });
+    return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  }
+  const pageNonce = createNonce();
+
+  async function handleGoogleCredential(response) {
+    const code = codeInput.value.replace(/\D/g, "");
+    codeInput.value = code;
+    if (!/^\d{8}$/.test(code)) {
+      setStatus("Enter the 8-digit code shown in Multix first.", "error");
+      return;
+    }
+    if (!response || !response.credential) {
+      setStatus("Google did not return a sign-in credential. Try again.", "error");
+      return;
+    }
+    googleButton.style.pointerEvents = "none";
+    setStatus("Verifying your Google account and connecting Multix…");
+    try {
+      const result = await fetch(API_BASE_URL.replace(/\/$/, "") + "/api/pairings/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "omit",
+        cache: "no-store",
+        body: JSON.stringify({ code, credential: response.credential, nonce: pageNonce })
+      });
+      const data = await result.json().catch(() => ({}));
+      if (!result.ok) throw new Error(data.error || "Could not approve this device.");
+      setStatus("Device approved. You can return to Multix now.", "success");
+    } catch (error) {
+      setStatus(error.message || "Connection failed. Check the code and try again.", "error");
+      googleButton.style.pointerEvents = "auto";
+    }
+  }
+
+  function initialiseGoogle() {
+    if (API_BASE_URL.includes("your-multix-api.example.com")) {
+      setStatus("Setup required: configure the API URL and Google Client ID in signin.html.", "error");
+      return;
+    }
+    if (GOOGLE_CLIENT_ID.includes("YOUR_GOOGLE_")) {
+      setStatus("Setup required: add your Google Web Client ID to signin.html.", "error");
+      return;
+    }
+    if (!window.google || !google.accounts || !google.accounts.id) {
+      setStatus("Google Sign-In could not load. Check your connection and refresh.", "error");
+      return;
+    }
+    google.accounts.id.initialize({
+      client_id: GOOGLE_CLIENT_ID,
+      callback: handleGoogleCredential,
+      nonce: pageNonce,
+      auto_select: false,
+      use_fedcm_for_prompt: true
+    });
+    google.accounts.id.renderButton(googleButton, {
+      type: "standard", theme: "filled_black", size: "large",
+      shape: "pill", text: "continue_with", width: 280
+    });
+  }
+
+  codeInput.addEventListener("input", () => {
+    codeInput.value = codeInput.value.replace(/\D/g, "").slice(0, 8);
+    if (statusBox.classList.contains("error")) statusBox.className = "status";
+  });
+  window.addEventListener("load", () => {
+    const startedAt = Date.now();
+    const timer = setInterval(() => {
+      if (window.google && google.accounts && google.accounts.id) {
+        clearInterval(timer);
+        initialiseGoogle();
+      } else if (Date.now() - startedAt > 10000) {
+        clearInterval(timer);
+        setStatus("Google Sign-In did not load. Refresh the page and try again.", "error");
+      }
+    }, 100);
+  });
+</script>
+</body>
+</html>
